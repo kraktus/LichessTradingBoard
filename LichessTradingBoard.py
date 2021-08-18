@@ -70,7 +70,7 @@ log.addHandler(handler_2)
 
 
 class Day:
-    date: "datetime"
+    datetime: "datetime"
     close: int
     open: Optional[int]
     high: int
@@ -103,40 +103,44 @@ class Day:
 
 class LichessTradingBoard:
 
-    def __init__(self, user: str, perf_type: str, update: bool = False) -> None:
+    def __init__(self, user: str, perf_type: str, max_games: int = 1000, update: bool = False) -> None:
         self.user = user.casefold()
         self.perf_type = perf_type
+        self.max_games = max_games
         self.path = Path(f'./downloads/{self.user}/{self.perf_type}.csv')
-        self.df = self.get_panda()
+        self.df = self.get_panda(update)
         http = requests.Session()
         http.mount("https://", ADAPTER)
         http.mount("http://", ADAPTER)
         self.http = http
 
-    def get_panda(self) -> "PandaFrame":
+    def get_panda(self, update: bool) -> "PandaFrame":
         """
         Return game statistics if already downloaded and stored.
         Otherwise return an empty `PandaFrame`
         """
-        if self.path.exists():
-            df = pd.read_csv(self.path,index_col=0,parse_dates=True)
-            df.index.name = "Datetime"
+        if self.path.exists() and not update:
+            log.info("Existing dataframe found, using it")
+            df = pd.read_csv(self.path,index_col=0, parse_dates=True)
+            df.index.name = "Date"
             return df
-        df = pd.DataFrame(columns=["Datetime", "Open", "High", "Low", "Close", "Volume"])
-        df.set_index('Datetime',inplace=True)
+        log.info("No dataframe found, creating it")
+        df = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex([], name='Date'))
+        log.debug(df)
         return df
 
-    def save_panda(self) -> None:
+    def save_df(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.df.to_csv(self.path)
 
-    def get_games(self, from_: int, to: int) -> None:
+    def fetch_games(self) -> None:
         buffer = deque()
-        r = self.http.get(GAME_API.format(self.user), params={"moves": False, "rated": True, "perfType": self.perf_type}, headers=API_KEY, stream=True)
+        log.info(f"{self.max_games} asked, about {self.max_games // 30}s to fetch them.")
+        r = self.http.get(GAME_API.format(self.user), params={"moves": False, "rated": True, "perfType": self.perf_type, "max": self.max_games, "variant": "standard"}, headers=API_KEY, stream=True)
         # reverse chronological order
         for game_raw in r.iter_lines():
             game = json.loads(game_raw.decode())
-            date = datetime.fromtimestamp(game["createdAt"] / 1000).date()
+            date = datetime.combine(datetime.utcfromtimestamp(game["createdAt"] / 1000).date(), datetime.min.time())
             before, after = self.get_rating(game)
             if len(buffer) == 1 and buffer[0].date == date:
                 buffer[0].update(before, after)
@@ -145,27 +149,47 @@ class LichessTradingBoard:
                 buffer.append(Day(date=date, before=before, after=after, close=after)) # Last game of the day first
             if buffer[0].date != date: # We've started a new day
                 # Save the computed day, if it's not the first game we've received
+                log.debug(f"Last game of {date}: {game}")
                 finished_day = buffer.popleft()
                 finished_day.finish(before)
                 self.df.loc[finished_day.date] = finished_day.to_list()
                 log.debug(self.df)
+        self.df = self.df[::-1] # Put back the data in chronological order TODO fix when data is already ok, use `reindex` `sort_value`?
 
-    def get_rating(self, game):
+    def get_rating(self, game) -> None:
         """Return the rating for the player `user` before and after the game"""
-        players = game["players"]
-        # log.debug(players)
-        if self.user in players["white"]["user"]["id"]:
-            before = int(players["white"]["rating"])
-            after = before + int(players["white"]["ratingDiff"])
-            return before, after
-        before = int(players["black"]["rating"])
-        after = before + int(players["black"]["ratingDiff"])
+        try:
+            players = game["players"]
+            # log.debug(players)
+            if self.user in players["white"]["user"]["id"]:
+                before = int(players["white"]["rating"])
+                after = before + int(players["white"].get("ratingDiff", 0))
+                return before, after
+            before = int(players["black"]["rating"])
+            after = before + int(players["black"].get("ratingDiff", 0))
+        except KeyError as e:
+            log.error(e)
+            log.error(f"Data: {game}")
+            raise Exception()
         return before, after
+
+    def show(self, df: "Dataframe") -> None:
+        mc = mpf.make_marketcolors(up='g',down='r')
+        s  = mpf.make_mpf_style(marketcolors=mc)
+        mpf.plot(df, type='candle', volume=True, style=s, ylabel='Rating', ylabel_lower="Games", title=f"{self.user} • {self.perf_type}")
+
+    def run(self) -> None:
+        self.fetch_games()
+
+        self.save_df()
+        df = self.df.astype(float)
+        self.show(df)
+
 
 ########
 # Main #
 ########
 
 if __name__ == "__main__":
-    test = LichessTradingBoard("german11", "bullet")
-    test.get_games(0,0)
+    test = LichessTradingBoard("German11", "blitz", max_games=4000, update=True)
+    test.run()
