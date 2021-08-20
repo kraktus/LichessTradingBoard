@@ -22,5 +22,5 @@ pip3 intstall -r requirements.txt
 It comes as a CLI. To remove display logging, use `python3 -O`
 Ex:
 ```
-python3 -0 LichessTradingBoard german11 blitz 4000 True
+python3 -O LichessTradingBoard german11 blitz 4000 True
 ```
