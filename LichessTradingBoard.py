@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Union, Tuple
 
 #############
 # Constants #
@@ -88,14 +88,12 @@ class Day:
 
     def update(self, before: int, after: int) -> None:
         # Remember, games are fetched in reverse chronological order
+        self.open = before
         self.high = max(self.high, before, after)
+        assert self.high >= max(before, after)
         self.low = min(self.low, before, after)
         self.volume += 1
         # log.debug(f"{self.volume} games on day {self.date}")
-
-    def finish(self, open: int) -> None:
-        """Called when every games of `date` have been processed"""
-        self.open = open
 
     def to_list(self) -> List[Union[datetime, int]]:
         assert self.open
@@ -114,7 +112,7 @@ class LichessTradingBoard:
         http.mount("http://", ADAPTER)
         self.http = http
 
-    def get_panda(self, update: bool) -> "PandaFrame":
+    def get_panda(self, update: bool) -> pd.PandaFrame:
         """
         Return game statistics if already downloaded and stored.
         Otherwise return an empty `PandaFrame`
@@ -126,7 +124,7 @@ class LichessTradingBoard:
             return df
         log.info("No dataframe found, creating it")
         df = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"], index=pd.DatetimeIndex([], name='Date'))
-        log.debug(df)
+        log.debug(f"Returned df: {df}")
         return df
 
     def save_df(self) -> None:
@@ -134,13 +132,13 @@ class LichessTradingBoard:
         self.df.to_csv(self.path)
 
     def fetch_games(self) -> None:
-        buffer = deque()
+        buffer: deque[Day] = deque()
         log.info(f"{self.max_games} asked, about {self.max_games // 30}s to fetch them.")
         r = self.http.get(GAME_API.format(self.user), params={"moves": False, "rated": True, "perfType": self.perf_type, "max": self.max_games, "variant": "standard"}, headers=API_KEY, stream=True)
         # reverse chronological order
         for game_raw in r.iter_lines():
             game = json.loads(game_raw.decode())
-            date = datetime.combine(datetime.utcfromtimestamp(game["createdAt"] / 1000).date(), datetime.min.time())
+            date = datetime.combine(datetime.utcfromtimestamp(game["lastMoveAt"] / 1000).date(), datetime.min.time())
             before, after = self.get_rating(game)
             if len(buffer) == 1 and buffer[0].date == date:
                 buffer[0].update(before, after)
@@ -151,12 +149,13 @@ class LichessTradingBoard:
                 # Save the computed day, if it's not the first game we've received
                 log.debug(f"Last game of {date}: {game}")
                 finished_day = buffer.popleft()
-                finished_day.finish(before)
                 self.df.loc[finished_day.date] = finished_day.to_list()
+                log.debug(finished_day)
+                log.debug(finished_day.to_list())
                 log.debug(self.df)
-        self.df = self.df[::-1] # Put back the data in chronological order TODO fix when data is already ok, use `reindex` `sort_value`?
+        self.df = self.df.sort_index() # Put back the data in chronological order
 
-    def get_rating(self, game) -> None:
+    def get_rating(self, game) -> Tuple[int, int]:
         """Return the rating for the player `user` before and after the game"""
         try:
             players = game["players"]
@@ -170,20 +169,22 @@ class LichessTradingBoard:
         except KeyError as e:
             log.error(e)
             log.error(f"Data: {game}")
-            raise Exception()
+            raise Exception(e)
         return before, after
 
-    def show(self, df: "Dataframe") -> None:
+    def show(self, df: Optional[pd.Dataframe] = None) -> None:
+        if df is None:
+            df = self.df
         mc = mpf.make_marketcolors(up='g',down='r')
         s  = mpf.make_mpf_style(marketcolors=mc)
         mpf.plot(df, type='candle', volume=True, style=s, ylabel='Rating', ylabel_lower="Games", title=f"{self.user} • {self.perf_type}")
 
     def run(self) -> None:
-        self.fetch_games()
-
+        if self.df.empty:
+            self.fetch_games()
+        self.df = self.df.astype(float)
         self.save_df()
-        df = self.df.astype(float)
-        self.show(df)
+        self.show()
 
 
 ########
@@ -191,5 +192,6 @@ class LichessTradingBoard:
 ########
 
 if __name__ == "__main__":
-    test = LichessTradingBoard("German11", "blitz", max_games=4000, update=True)
+    print('#'*80)
+    test = LichessTradingBoard("German11", "blitz", max_games=100, update=True)
     test.run()
