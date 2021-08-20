@@ -150,8 +150,6 @@ class LichessTradingBoard:
                 log.debug(f"Last game of {date}: {game}")
                 finished_day = buffer.popleft()
                 self.df.loc[finished_day.date] = finished_day.to_list()
-                log.debug(finished_day)
-                log.debug(finished_day.to_list())
                 log.debug(self.df)
         self.df = self.df.sort_index() # Put back the data in chronological order
         self.df = self.df.astype(float)

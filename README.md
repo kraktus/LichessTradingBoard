@@ -15,4 +15,12 @@ source venv/bin/activate
 Install the dependencies
 ```
 pip3 intstall -r requirements.txt
-``
+```
+
+## Use
+
+It comes as a CLI. To remove display logging, use `python3 -O`
+Ex:
+```
+python3 -0 LichessTradingBoard german11 blitz 4000 True
+```
