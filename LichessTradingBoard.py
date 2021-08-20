@@ -101,7 +101,7 @@ class Day:
 
 class LichessTradingBoard:
 
-    def __init__(self, user: str, perf_type: str, max_games: int = 1000, update: bool = False) -> None:
+    def __init__(self, user: str, perf_type: str, max_games: Optional[int] = None, update: bool = False) -> None:
         self.user = user.casefold()
         self.perf_type = perf_type
         self.max_games = max_games
@@ -133,7 +133,7 @@ class LichessTradingBoard:
 
     def fetch_games(self) -> None:
         buffer: deque[Day] = deque()
-        log.info(f"{self.max_games} asked, about {self.max_games // 30}s to fetch them.")
+        log.info(f"{self.max_games} asked, about {self.max_games // 30}s to fetch them, if the player only play that time control.")
         r = self.http.get(GAME_API.format(self.user), params={"moves": False, "rated": True, "perfType": self.perf_type, "max": self.max_games, "variant": "standard"}, headers=API_KEY, stream=True)
         # reverse chronological order
         for game_raw in r.iter_lines():
@@ -154,6 +154,7 @@ class LichessTradingBoard:
                 log.debug(finished_day.to_list())
                 log.debug(self.df)
         self.df = self.df.sort_index() # Put back the data in chronological order
+        self.df = self.df.astype(float)
 
     def get_rating(self, game) -> Tuple[int, int]:
         """Return the rating for the player `user` before and after the game"""
@@ -182,10 +183,18 @@ class LichessTradingBoard:
     def run(self) -> None:
         if self.df.empty:
             self.fetch_games()
-        self.df = self.df.astype(float)
         self.save_df()
         self.show()
 
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("player", help="Name of the Lichess user")
+    parser.add_argument("perf", help="Type of games you want to graph, can be either a time control or a variant name")
+    parser.add_argument("games", nargs='?', default=None, type=int, help="Number of games you want to fetch, default all")
+    parser.add_argument("update", nargs='?', default=False, type=bool, help="If you want to recompute a graph, default to `False`")
+    args = parser.parse_args()
+    board = LichessTradingBoard(args.player, args.perf, args.games, args.update)
+    board.run()
 
 ########
 # Main #
@@ -193,5 +202,4 @@ class LichessTradingBoard:
 
 if __name__ == "__main__":
     print('#'*80)
-    test = LichessTradingBoard("German11", "blitz", max_games=100, update=True)
-    test.run()
+    main()
