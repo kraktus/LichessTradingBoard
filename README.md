@@ -14,7 +14,7 @@ source venv/bin/activate
 ```
 Install the dependencies
 ```
-pip3 intstall -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 ## Use
