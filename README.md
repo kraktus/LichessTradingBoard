@@ -1,6 +1,7 @@
 # LichessTradingBoard
 Create candlestick graph from lichess rating history of a user
 
+![example](/german11_blitz_fixed.png)
 
 ## Installation
 
